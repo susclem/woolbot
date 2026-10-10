@@ -1,0 +1,59 @@
+{
+  "timezone": "Asia/Shanghai",
+  "db_path": "data/woolbot.db",
+
+  "provider": "deepseek",
+  "providers": {
+    "deepseek": {
+      "base_url": "https://api.deepseek.com",
+      "api_key": "",
+      "model": "deepseek-v4-flash",
+      "vision_model": "",
+      "temperature": 0,
+      "timeout": 120
+    }
+  },
+
+  "query": {
+    "mode": "strict",
+    "//show_ongoing": "「今天有什么活动」这种看全天的清单里，要不要附一节「还能领的」。关掉就只列当天开抢的。（按分钟问的回复不受它管，那种问法本来就不带只能领不能抢的。）",
+    "show_ongoing": true,
+    "//later_limit": "按分钟问、那一刻没有命中时，后面那节「这一天还没开始的」最多列几条（没写就用 ongoing_limit）。真机上它能一次列 8 条长标题，微信里就是刷屏；超出的折成「还有 N 条，去日历页面看」。",
+    "later_limit": 5,
+    "//ongoing_limit": "上面那个上限的旧名字，保留是为了不弄坏已经写好的配置。",
+    "ongoing_limit": 5
+  },
+
+  "web": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 16886,
+    "token": "",
+    "//public_host": "外面能访问到这台机器的地址。deploy/deploy_woolbot.py 每次部署会自动写成 NAS 的真实 IP —— 容器自己算出来的那个是 docker 网桥的 172.x，手机连不上。手动跑 python main.py web 时可以不管它。",
+    "public_host": "",
+    "//public_port": "宿主机上映射出来的端口（部署脚本按 --local-port 写）。和 port 一样是 16886，因为 docker-compose.yml 的映射两边同号。",
+    "public_port": 16886
+  },
+
+  "wechat": {
+    "enabled": true,
+    "state_file": "data/weixin_state.json",
+    "media_dir": "data/media",
+    "allowed_users": [],
+    "session_hours": 24,
+    "warn_before_hours": 2,
+
+    "//entry_base": "iLink 入口。正常别动；只在自建/调试端点时才改。",
+    "entry_base": "https://ilinkai.weixin.qq.com",
+    "//cdn_base": "图片 CDN 基础地址。正常别动。",
+    "cdn_base": "https://novac2c.cdn.weixin.qq.com/c2c",
+    "//save_media": "入站图片要不要留一份到 media_dir（排查问题时有用）。改成 false 就一张都不留，图照样送去识别。改完重启容器生效。",
+    "save_media": true,
+    "//timeout_poll": "长轮询超时秒数；服务端会给更准确的值，这里只是初值。",
+    "timeout_poll": 35
+  },
+
+  "log": {
+    "level": "INFO"
+  }
+}

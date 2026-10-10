@@ -1,0 +1,5 @@
+requests>=2.31
+pycryptodome>=3.20
+tzdata>=2024.1
+# 把登录链接画成二维码 PNG（纯 Python、零依赖，比 qrcode+pillow 轻得多）
+segno>=1.6

@@ -1,0 +1,41 @@
+# 羊毛机器人。`docker compose up -d --build` 即可。
+services:
+  woolbot:
+    build: .
+    image: woolbot:latest
+    container_name: woolbot
+    restart: unless-stopped
+    # 以「宿主的 uid:gid」运行，而不是镜像里写死的 1000:1000。
+    # 否则挂载进来的 ./data 归 宿主用户:宿主组 所有（常见是 1000:1001），
+    # 组对不上，drwxr-xr-x 对容器就只剩只读，sqlite 会报
+    # "unable to open database file" —— 这个坑在飞牛 NAS 上实测踩过。
+    # 部署脚本会把真实的 uid/gid 写进同目录的 .env。
+    user: "${WOOLBOT_UID:-1000}:${WOOLBOT_GID:-1000}"
+    ports:
+      # 左边是 NAS 上对外暴露的端口，右边是容器内监听的端口。**两边必须是同一个数**
+      # （2026-10-10 从 8080 改成 16886）：`config.json` 的 `web.port`、这个映射、
+      # `Dockerfile` 的 EXPOSE/HEALTHCHECK 三处说的都是同一个端口，改就一起改。
+      # 另外 NAS 上还有一层反代指着它（实测是 Lucky 的 5668 那条规则），也要跟着改。
+      - "16886:16886"
+    volumes:
+      # :ro —— 这个文件由部署脚本管，容器不需要写它（运行时改的东西全在
+      # data/woolbot.db 的 settings 表里）。想改它就在 NAS 上直接编辑，
+      # 改完 docker compose restart 即可，别在容器里改（会撞上只读挂载）。
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+    # DNS 写死，不让它继承宿主的 /etc/resolv.conf。
+    # 踩过的坑（2026-10-08）：NAS 上跑着 Tailscale，它会把宿主的 resolv.conf 换成
+    # 自己的 MagicDNS（100.100.100.100）。容器**启动那一刻**若正是它，Docker 就把它
+    # 记进容器内 127.0.0.11 转发器的上游（resolv.conf 注释里的 ExtServers），
+    # 运行中**不会**再重读宿主 —— 之后 Tailscale 一断（比如回到家里），容器里所有
+    # 域名解析立刻失败，报「Temporary failure in name resolution」：模型调不动、
+    # 一言取不到，看着像 key 或余额的问题，其实只是 DNS。
+    # 写死两个公网 DNS 就与 Tailscale / 路由器的状态彻底解耦。
+    dns:
+      - ${WOOLBOT_DNS:-223.5.5.5}
+      - ${WOOLBOT_DNS_BACKUP:-1.1.1.1}
+    environment:
+      TZ: Asia/Shanghai
+      # API key 走环境变量，别写进 config.json（那文件会被挂载、也容易误传）。
+      # 在同一个目录放一个 .env 文件，写一行 WOOLBOT_API_KEY=sk-xxx 即可。
+      WOOLBOT_API_KEY: ${WOOLBOT_API_KEY:-}

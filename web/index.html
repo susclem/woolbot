@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>羊毛日历</title>
+<script>
+// 白天/夜间必须在样式表之前定下来，否则深色会先闪一帧白底。
+// 第一次来跟随系统；点过开关之后就只认 localStorage 里存的那个。
+(function () {
+  var t = '';
+  try { t = localStorage.getItem('woolbot_theme') || ''; } catch (e) { /* 无痕模式下会抛 */ }
+  if (t !== 'dark' && t !== 'light') {
+    t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="top">
+  <button id="btnTheme" class="btn ghost theme-toggle" type="button"
+          title="切换到夜间模式" aria-label="切换到夜间模式">☀️</button>
+  <div class="top-right">
+    <button id="btnToday" class="btn ghost" type="button">回到今天</button>
+    <button id="btnHelp" class="btn ghost" type="button" title="woolbot使用帮助">使用帮助</button>
+    <button id="btnSettings" class="btn ghost" type="button" title="AI 模型设置">设置</button>
+  </div>
+</header>
+
+<!-- 模型没配好时的提醒。机器人读不懂消息这件事必须显眼，不然用户会以为坏了。
+     两种情形共用这一块：① 一个 key 都没有（黄）；② 有 key 但用不了（红，见 pollSettings） -->
+<section id="setupPanel" class="setup-panel" hidden>
+  <div class="setup-text">
+    <h2 id="setupTitle">⚠️ 还没配 AI 模型</h2>
+    <p id="setupBody">日历能用，但机器人还读不懂你发的消息。填一个 API key 就能用了 ——
+       存了立刻生效，不用重启。</p>
+  </div>
+  <button id="btnSetup" class="btn primary" type="button">去配置</button>
+</section>
+
+<!-- 扫码那块 2026-10-11 挪进了「设置 → 功能」页（用户要求），和微信连接状态一起。
+     页面上不再单独占一条横幅。 -->
+
+<section class="toolbar">
+  <div class="seg" role="tablist">
+    <button class="seg-btn active" data-view="month" type="button">月视图</button>
+    <button class="seg-btn" data-view="agenda" type="button">列表</button>
+  </div>
+
+  <input id="q" class="input" type="search" placeholder="搜索标题 / 平台 / 备注…" autocomplete="off">
+
+  <select id="fStatus" class="input">
+    <option value="all">全部状态</option>
+    <option value="pending">待抢</option>
+    <option value="done">已完成</option>
+    <option value="expired">已过期</option>
+  </select>
+
+  <select id="fPlatform" class="input">
+    <option value="all">全部平台</option>
+  </select>
+
+  <button id="btnAdd" class="btn primary" type="button">＋ 新增</button>
+</section>
+
+<main>
+  <!-- 月视图：左边日历、右边是这一天的清单。日历压到 660px 封顶（不再占满整屏），
+       格子里只留「几条 + 哪几个时刻」，完整的标题挪到右边去。
+       右栏点标题就地变详情（日历仍然看得见），「‹ 返回清单」一步回来。 -->
+  <div class="cal-nav" id="calNav">
+    <button id="btnPrev" class="btn ghost" type="button">‹</button>
+    <h2 id="periodLabel">—</h2>
+    <button id="btnNext" class="btn ghost" type="button">›</button>
+    <span id="countLabel" class="count"></span>
+  </div>
+
+  <div class="split">
+    <!-- 月视图的日历本身 -->
+    <section id="monthView" class="pane cal-pane">
+      <div class="weekdays">
+        <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+      </div>
+      <div id="grid" class="grid"></div>
+    </section>
+
+    <!-- 右栏：选中那天的活动标题 / 某条活动的详情 -->
+    <aside id="sidePane" class="pane side-pane">
+      <div id="sideHead" class="side-head"></div>
+      <div id="sideBody" class="side-list"></div>
+    </aside>
+  </div>
+
+  <!-- 列表视图（整月，按天铺开；这时日历和右栏都收起来） -->
+  <section id="agendaView" class="pane agenda-pane" hidden>
+    <div id="agenda" class="agenda"></div>
+  </section>
+</main>
+
+<!-- 编辑/新增弹层 -->
+<div id="modal" class="modal" hidden>
+  <form id="form" class="sheet">
+    <h3 id="formTitle">新增活动</h3>
+    <label>标题 <input name="title" required placeholder="京东超市 满99减50 领券"></label>
+    <div class="row">
+      <label>平台 <input name="platform" placeholder="京东"></label>
+      <label>品类 <input name="category" placeholder="日用"></label>
+    </div>
+    <div class="row">
+      <label>开抢时刻 <input name="grab_at" type="datetime-local"></label>
+      <label>状态
+        <select name="status">
+          <option value="pending">待抢</option>
+          <option value="done">已完成</option>
+          <option value="expired">已过期</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label>开始 <input name="start_at" type="datetime-local"></label>
+      <label>有效期至 <input name="end_at" type="datetime-local"></label>
+    </div>
+    <label>重复
+      <input name="repeat" placeholder="每天 09:00 / 每天 08:30-22:00 / 每周二、四 10:00 / 每月1日、15日 10:00（不重复就留空）">
+    </label>
+    <div class="row">
+      <label>每周最多抢几次
+        <input name="quota_week" type="number" min="1" max="99" step="1" placeholder="留空＝不限">
+      </label>
+      <label>每月最多抢几次
+        <input name="quota_month" type="number" min="1" max="99" step="1" placeholder="留空＝不限">
+      </label>
+    </div>
+    <p class="dim">
+      「每周几次、每月几次」按自然周（周一起）和自然月算。领满之后，本周/本月
+      剩下那几天会显示成已完成，下周/下月自动恢复待抢。
+    </p>
+    <label>链接 <input name="url" placeholder="https://…"></label>
+    <label>备注 <input name="note" placeholder="限会员 / 需领券"></label>
+    <div class="sheet-actions">
+      <button type="button" id="btnCancel" class="btn ghost">取消</button>
+      <button type="button" id="btnDelete" class="btn danger" hidden>删除</button>
+      <button type="submit" class="btn primary">保存</button>
+    </div>
+  </form>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<!-- AI 模型设置。放在这里而不是 config.json，是因为用户没法 SSH 上 NAS 改文件，
+     改了也还得重启容器。存进数据库就能立刻生效。 -->
+<div id="settingsModal" class="modal" hidden>
+  <div class="sheet">
+    <h3>设置</h3>
+    <!-- 设置页分 功能 / 模型 / 安全 三段（用户 2026-10-10 先要求分段、同日又要求
+         「做成三个同级的小页」）。三段各包一层 `section.sheet-pane`（CSS 选择器写法，
+         这里故意不写那个标签的原文 —— 这条注释也在弹窗那一片里，`SettingsSheetTest`
+         正拿整片文本数它），顶上那排 #settingsTabs 一次只露一页；**控件 id 一个没改**
+         —— `app.js` 全靠它们认控件，翻页只是切 hidden。样式在 style.css。 -->
+    <div class="tabs" id="settingsTabs" role="tablist">
+      <button type="button" class="tab on" role="tab" aria-selected="true"
+              data-pane="paneFunc">功能</button>
+      <button type="button" class="tab" role="tab" aria-selected="false"
+              data-pane="paneModel">模型</button>
+      <button type="button" class="tab" role="tab" aria-selected="false"
+              data-pane="paneSafe">安全</button>
+    </div>
+
+    <section class="sheet-pane" id="paneFunc" role="tabpanel">
+      <!-- 微信：扫码绑定 + 连接状态。用户 2026-10-11 要求把这套从页面顶部挪进
+           设置，并且放在「允许机器人闲聊」**前面** —— 机器人到底连没连上微信，
+           比闲聊这种偏好更该先看到。顶栏那颗胶囊（`#botPill`）也在这块里。
+           二维码那块原来是页面上独立的 `section.login-panel`，现在缩进弹窗里；
+           样式仍是同一个类，由 `.sheet .login-panel` 覆盖成竖排（弹窗窄，摆不下
+           原来的左右两栏）。 -->
+      <div class="wx-block" id="wxBlock">
+        <div class="wx-head">
+          <span class="wx-title">微信</span>
+          <span id="botPill" class="pill" hidden></span>
+          <button type="button" id="btnWxLogout" class="btn ghost" hidden
+                  title="只清掉 NAS 上存的登录；微信里那条授权要在微信里「解除连接」">退出微信</button>
+        </div>
+        <section id="loginPanel" class="login-panel" hidden>
+          <div class="login-text">
+            <p>用微信扫下面的二维码，机器人才能收发消息。二维码约 5 分钟失效，过期了会自动换一张。</p>
+            <p class="dim" id="loginHint"></p>
+            <p class="dim login-link" id="qrLink" hidden></p>
+          </div>
+          <div class="login-qr">
+            <img id="qrImg" alt="登录二维码" width="200" height="200">
+            <button id="btnRefreshQr" class="btn ghost" type="button">刷新二维码</button>
+          </div>
+        </section>
+      </div>
+
+      <label class="check">
+        <input id="sChat" type="checkbox">
+        <span>允许机器人闲聊（「你好」「你是谁」这类）</span>
+      </label>
+
+      <label class="check">
+        <input id="sRemind" type="checkbox">
+        <span>活动开抢前主动发微信提醒</span>
+      </label>
+      <label>提前多少分钟 <input id="sRemindMinutes" type="number" step="1" min="5" placeholder="10"></label>
+
+      <label class="check">
+        <input id="sSayings" type="checkbox">
+        <span>每条回复末尾带一句「一言」</span>
+      </label>
+      <!-- 一言的源：填分类字母（如 d,i,k,h）或一个完整网址，留空＝默认的四类。
+           字母清单只有一处权威（`app/sayings.py::CATEGORIES` → `/api/settings` 的
+           `sayings_categories`），由脚本填进下面那个 span —— 用户 2026-10-10：
+           「把一言来源的字母分类注释到『一言来源』后面」。 -->
+      <label>一言来源
+        <span class="cats" id="sSayingsCats"></span>
+        <input id="sSayingsSource" placeholder="留空＝d,i,k,h" autocomplete="off">
+      </label>
+    </section>
+
+    <section class="sheet-pane" id="paneModel" role="tabpanel" hidden>
+      <label>接口地址 base_url
+        <input id="sBaseUrl" placeholder="https://api.deepseek.com" autocomplete="off">
+      </label>
+      <label>API key
+        <input id="sApiKey" type="password" placeholder="sk-…" autocomplete="off">
+      </label>
+      <p class="dim">
+        <span id="sKeyState"></span>
+        留空则不改动已存的 key。
+      </p>
+      <p class="field-note bad" id="sKeyError" hidden></p>
+      <!-- 用户 2026-10-10 要求把设置里那两个模型框合并成一个（原话见 README「踩过的坑」）。
+           页面只留一个框；存的时候 `model` 与 `vision_model` 都写这个值（图片解析仍然
+           读 `vision_model`，只是不再单独露一个框）。
+           **这段注释里故意不写那两个 label 的原文**：`SettingsSheetTest` 是拿弹窗全文去
+           找它们的，HTML 注释也在那一片里 —— 写了就等于自己把用例弄红。 -->
+      <label>模型 <input id="sModel" placeholder="deepseek-chat" autocomplete="off"></label>
+      <!-- temperature 那行注释是用户 2026-10-10 点名要的：「给它注释上『默认别动』」。
+           它是直接发给模型的随机性旋钮 —— 0 最稳，调高会让活动信息被抽错。 -->
+      <label>temperature
+        <span class="hint">默认别动</span>
+        <input id="sTemp" type="number" step="0.1" min="0" max="2" placeholder="0"
+               title="默认别动：0 表示每次结果都一样；调高会让活动信息抽错">
+      </label>
+      <!-- 「测试连接」测的就是上面这组模型项，所以跟着它们站在这一段里，
+           不跟取消/保存挤在页脚；它那句结果回显（`#testResult`）也搬过来贴着按钮。 -->
+      <div class="row">
+        <button type="button" id="btnTest" class="btn ghost">测试连接</button>
+      </div>
+      <p class="dim" id="testResult"></p>
+    </section>
+
+    <section class="sheet-pane" id="paneSafe" role="tabpanel" hidden>
+      <label class="check">
+        <input id="sTokenRequired" type="checkbox">
+        <span>打开页面需要口令（<code>?token=…</code>）</span>
+      </label>
+      <label>页面口令
+        <input id="sWebToken" type="password" autocomplete="new-password" placeholder="留空则不改动">
+      </label>
+
+      <label class="check">
+        <input id="sDomain" type="checkbox">
+        <span>用外网域名访问</span>
+      </label>
+      <label>域名 <input id="sDomainUrl" placeholder="wool.example.com" autocomplete="off"></label>
+
+      <label class="check">
+        <input id="sLogin" type="checkbox">
+        <span>打开页面要访问秘钥</span>
+      </label>
+      <label>访问秘钥
+        <input id="sLoginKey" type="password" autocomplete="new-password" placeholder="留空则不改动">
+      </label>
+
+      <!-- 退出登录原来在顶栏，但「画它显示还是隐藏」的那行代码只在打开这个弹窗时
+           才跑，于是它看起来像「设置」的附属品（用户 2026-10-09 报的）。它管的就是
+           秘钥这一层，挪进来跟秘钥放一起最顺。点了它 = 登录 cookie 清掉 + 服务端
+           会话版本号 +1，**所有设备**上的登录一起失效。 -->
+      <div class="row">
+        <button type="button" id="btnLogout" class="btn ghost"
+                title="清掉登录，并把会话版本号 +1 —— 所有设备上的登录一起失效">退出登录<span
+          class="note">退出所有设备（非必要不要点）</span></button>
+      </div>
+    </section>
+
+    <div class="sheet-actions">
+      <button type="button" id="btnSettingsCancel" class="btn ghost">取消</button>
+      <button type="button" id="btnSettingsSave" class="btn primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 使用帮助弹窗。内容是 `/api/help` 给的，和微信里发「使用帮助」收到的是
+     同一段文字（都出自 pipeline.HELP_TEXT），省得两处各写一份。 -->
+<div id="helpModal" class="modal" hidden>
+  <div class="sheet">
+    <h3>woolbot使用帮助</h3>
+    <p class="dim">这段字在微信里发「使用帮助」也能拿到。</p>
+    <pre id="helpText" class="help-text">正在取…</pre>
+    <div class="sheet-actions">
+      <button type="button" id="btnHelpClose" class="btn primary">知道了</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

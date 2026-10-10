@@ -1,0 +1,412 @@
+/* 两套配色：白天是下面这套，夜间在 :root[data-theme="dark"] 里。
+   什么时候算夜间不看系统，看 <html data-theme="…">—— 那个属性由 index.html 里
+   一段内联脚本在 CSS 之前定好（首次访问跟随系统，点过按钮之后就记住人的选择），
+   所以不存在「先按系统画一帧再翻成用户要的那套」的闪白。
+   `color-scheme` 也得跟着走，否则滚动条、原生下拉框还是另一套底色。 */
+:root {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --line: #e4e6eb;
+  --text: #1c1f23;
+  --muted: #6b7280;
+  --accent: #c2410c;
+  --accent-soft: #fff1e7;
+  --pending: #b45309;
+  --pending-bg: #fef3c7;
+  --done: #15803d;
+  --done-bg: #dcfce7;
+  --expired: #6b7280;
+  --expired-bg: #eceef1;
+  --danger: #b91c1c;
+  --danger-line: #f0b4b4;
+  --term: #0f766e;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 8px 24px -12px rgba(16, 24, 40, .18);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #16181d;
+  --panel: #1f2228;
+  --line: #31353d;
+  --text: #e8eaed;
+  --muted: #9aa1ac;
+  --accent: #fb923c;
+  --accent-soft: #3a2a1d;
+  --pending: #fbbf24;
+  --pending-bg: #3a2f16;
+  --done: #4ade80;
+  --done-bg: #16301f;
+  --expired: #9aa1ac;
+  --expired-bg: #292c33;
+  --danger: #f87171;
+  --danger-line: #7f1d1d;
+  --term: #2dd4bf;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .6);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.top {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 18px; background: var(--panel); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 20;
+}
+/* 白天/夜间开关。符号跟着**当前**模式走：白天 ☀️、夜间 🌙。
+   光看符号容易读反（以为写的是点下去会变成什么），所以 title 里把动作说明白。 */
+.theme-toggle {
+  /* 40px 是给 ☼/☽ 那种单色符号留的；换成 ☀️/🌙 这两个彩色 emoji 之后
+     它们比同字号的文字宽一点，窄了会把符号挤到边框上。 */
+  flex: none; min-width: 46px; padding: 5px 10px;
+  font-size: 17px; line-height: 1.2; color: var(--muted);
+}
+.theme-toggle:hover { color: var(--accent); border-color: var(--muted); }
+.top-right { display: flex; align-items: center; gap: 10px; }
+
+.pill {
+  font-size: 12px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--muted);
+  white-space: nowrap;
+}
+.pill.on { color: var(--done); border-color: var(--done); background: var(--done-bg); }
+.pill.off { color: var(--pending); border-color: var(--pending); background: var(--pending-bg); }
+.pill.warn { color: var(--danger); border-color: currentColor; background: var(--pending-bg); }
+
+.login-panel {
+  display: flex; gap: 20px; align-items: center; justify-content: space-between;
+  margin: 12px 18px 0; padding: 16px 18px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-left: 4px solid var(--accent); border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.login-panel[hidden] { display: none; }
+.login-text h2 { margin: 0 0 6px; font-size: 15px; }
+.login-text p { margin: 4px 0; font-size: 13px; color: var(--muted); max-width: 46ch; }
+.login-text .dim { font-size: 12px; opacity: .8; }
+/* 二维码画不出来时的兜底：直接把登录链接给出来，别让人干等 */
+.login-link { max-width: 46ch; word-break: break-all; }
+.login-link a { color: var(--accent); }
+.login-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.login-qr img {
+  width: 200px; height: 200px; padding: 6px;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  image-rendering: pixelated;
+}
+
+@media (max-width: 620px) {
+  .login-panel { flex-direction: column; align-items: stretch; }
+  .login-qr { align-self: center; }
+}
+
+/* 没配模型时的提醒条。机器人读不懂消息这件事必须显眼 */
+.setup-panel {
+  display: flex; gap: 16px; align-items: center; justify-content: space-between;
+  margin: 12px 18px 0; padding: 14px 18px;
+  background: var(--pending-bg); border: 1px solid var(--pending);
+  border-left: 4px solid var(--pending); border-radius: var(--radius);
+}
+.setup-panel[hidden] { display: none; }
+.setup-text h2 { margin: 0 0 4px; font-size: 15px; }
+.setup-text p { margin: 0; font-size: 13px; color: var(--muted); max-width: 60ch; }
+/* 「还没配」是黄条（提醒），「配了但用不了」是红条（故障）—— 后者更严重，
+   因为它比前者更坑：黄条消失了，用户以为已经好了。 */
+.setup-panel.danger {
+  background: var(--bg); border-color: var(--danger);
+  border-left: 4px solid var(--danger);
+}
+.setup-panel.danger .setup-text h2 { color: var(--danger); }
+.setup-panel.danger .setup-text p { color: var(--text); }
+
+.modal .sheet label.check {
+  display: flex; align-items: center; gap: 8px; flex-direction: row;
+  font-size: 13px; color: var(--text);
+}
+.modal .sheet label.check input { width: auto; flex: none; }
+.modal .sheet code {
+  background: var(--bg); border: 1px solid var(--line);
+  padding: 1px 5px; border-radius: 5px; font-size: 12px;
+}
+.ok { color: var(--done); }
+.warn { color: var(--pending); }
+.bad { color: var(--danger); }
+/* 字段底下单独一行说明（失败原因、校验提示） */
+.field-note { margin: -6px 0 10px; font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 620px) {
+  .setup-panel { flex-direction: column; align-items: stretch; gap: 10px; }
+}
+
+.toolbar {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.seg { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 2px; }
+.seg-btn {
+  border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px;
+  padding: 6px 14px; border-radius: 8px; cursor: pointer;
+}
+.seg-btn.active { background: var(--panel); color: var(--text); box-shadow: var(--shadow); font-weight: 600; }
+
+.input {
+  font: inherit; font-size: 13px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; min-width: 120px;
+}
+#q { flex: 1 1 200px; min-width: 160px; }
+
+.btn {
+  font: inherit; font-size: 13px; border-radius: 10px; padding: 7px 13px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn.danger { color: var(--danger); border-color: var(--danger-line); }
+.btn.ghost { background: transparent; }
+/* 按钮自带的小字说明（用户在 2026-10-09 让「退出登录」多带一句）。
+   写在按钮**里面**是有意的：它跟着按钮一起显示/隐藏（`btnLogout` 是
+   `hidden` 的），不用再多一行 JS 去伺候它。 */
+.btn .note { display: block; font-size: 11px; font-weight: 400; opacity: .75; line-height: 1.35; }
+
+/* 日历 + 右栏清单。日历用 660px 封顶：再宽就是一片空白格子，反而看不清哪天有活动。
+   窄屏（<1080px）落成一列，清单跑到日历下面。 */
+main { padding: 14px 18px 60px; max-width: 1440px; margin: 0 auto; }
+.split { display: grid; grid-template-columns: minmax(0, 660px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.pane {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.cal-pane { padding: 12px 12px 14px; }
+.agenda-pane { padding: 14px; }
+
+.cal-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.cal-nav h2 { font-size: 16px; margin: 0; font-weight: 650; }
+.count { margin-left: auto; color: var(--muted); font-size: 12.5px; }
+
+.weekdays, .grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.weekdays { margin-bottom: 6px; }
+/* 左对齐 + 7px 内缩，才能和格子里的日期数字对齐（居中会看起来整体错位） */
+.weekdays span { text-align: left; padding-left: 7px; font-size: 12px; color: var(--muted); }
+
+/* 格子里三处信息：「几号」大一点在左上、农历/节气/节日（只一条）小字在左下、
+「几条」小一点在右下，法定节假日的「休/班」小标在右上角。用户 2026-10-07 先让把时刻
+去掉、只留条数，紧接着又说「挪到右下角吧，现在看着有点眼花。把日历上的日期数字大一点，
+日历上的数量数字小一点」，再接着要「加入农历、二十四节气、中国节日、法定节假日」。 */
+.cell {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  min-height: 54px; padding: 6px 8px 5px; display: flex; flex-direction: column;
+  justify-content: space-between; cursor: pointer; overflow: hidden;
+}
+.cell:hover { border-color: var(--muted); }
+.cell.out { opacity: .45; }
+.cell.today { border-color: var(--accent); background: var(--accent-soft); }
+.cell.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.cell-top, .cell-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
+.cell-day { font-size: 15.5px; font-weight: 650; line-height: 1.1; color: var(--muted); }
+.cell.today .cell-day { color: var(--accent); }
+/* 条数：不套色块（一屏 42 个橙色小胶囊会花），就是右下角一个淡淡的小数字 */
+.cell-cnt {
+  font-size: 10px; font-weight: 600; line-height: 1; color: var(--accent); opacity: .75;
+}
+/* 农历/节气/节日：一行小字，放不下就截断（完整信息在 title 和右栏标题里） */
+.cell-note {
+  font-size: 10px; line-height: 1.2; color: var(--muted); opacity: .8;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cell-note.k-term { color: var(--term); opacity: .95; }       /* 节气：青 */
+.cell-note.k-festival { color: var(--accent); opacity: .9; } /* 节日：橙 */
+.cell-note.k-holiday { color: var(--muted); }
+/* 法定节假日的休/班小标 */
+.cell-rest {
+  font-size: 9.5px; font-weight: 700; line-height: 1; padding: 2px 3px; border-radius: 4px;
+  color: #fff; background: var(--muted); flex: none;
+}
+.cell-rest.off { background: #dc2626; }
+.cell-rest.work { background: var(--muted); }
+
+/* ---- 右栏：选中那天的标题清单 / 某条活动的详情 ---- */
+.side-pane { padding: 12px 0 8px; overflow: hidden; }
+.side-head {
+  display: flex; align-items: center; gap: 8px; padding: 0 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.side-head h3 { font-size: 14.5px; margin: 0; font-weight: 650; }
+.side-head .n { font-size: 12.5px; color: var(--muted); }
+.side-head .btn { margin-left: auto; }
+.side-list { padding: 6px 6px 2px; max-height: 640px; overflow: auto; }
+
+/* 时刻分组（同一时刻只写一遍，和微信里的格式一致） */
+.tgroup {
+  display: flex; align-items: center; gap: 7px; padding: 9px 8px 4px;
+  font-size: 12px; color: var(--accent); font-weight: 700;
+}
+.tgroup .line { flex: 1; height: 1px; background: var(--line); }
+.sect { font-size: 12px; color: var(--muted); font-weight: 600; padding: 14px 8px 4px; }
+
+.act {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  font: inherit; font-size: 13.5px; padding: 9px 10px; border: 0; background: transparent;
+  border-radius: 9px; cursor: pointer; color: var(--text);
+}
+.act:hover { background: var(--accent-soft); }
+.act .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act .chev { color: var(--muted); font-size: 15px; }
+.act.done .t { text-decoration: line-through; color: var(--muted); }
+.act.expired .t { color: var(--muted); }
+
+.detail { padding: 13px 14px 14px; }
+.detail .back {
+  font: inherit; font-size: 12.5px; color: var(--muted); background: none; border: 0;
+  cursor: pointer; padding: 0 0 9px;
+}
+.detail .back:hover { color: var(--text); }
+.detail h3 { margin: 0 0 4px; font-size: 16px; line-height: 1.45; }
+.detail .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0 13px; }
+.badge.plain { background: var(--bg); color: var(--muted); font-weight: 500; }
+.kv { display: grid; grid-template-columns: 78px 1fr; gap: 6px 10px; margin: 0; font-size: 13px; }
+.kv dt { color: var(--muted); font-size: 12.5px; }
+.kv dd { margin: 0; }
+.kv dd .big { font-size: 15px; font-weight: 650; color: var(--accent); }
+.detail .note {
+  margin-top: 13px; font-size: 12.5px; color: var(--muted); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; line-height: 1.7;
+}
+.detail .d-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.detail a { color: var(--accent); font-size: 12.5px; word-break: break-all; }
+
+.hint { font-size: 12px; color: var(--muted); padding: 10px 14px; }
+.side-list .empty { padding: 26px 8px; }
+
+.agenda { display: flex; flex-direction: column; gap: 14px; }
+.agenda-day > h3 { font-size: 13.5px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+.agenda-day.today > h3 { color: var(--accent); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; cursor: pointer;
+}
+.card:hover { border-color: var(--muted); }
+.card.title-row { flex-direction: row; align-items: baseline; gap: 8px; }
+.card h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.card .when { font-size: 12.5px; color: var(--accent); font-weight: 600; }
+.card .meta { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 8px; }
+.card .note { font-size: 12.5px; color: var(--muted); }
+.card a { color: var(--accent); font-size: 12px; word-break: break-all; }
+.card.done h4 { text-decoration: line-through; color: var(--muted); }
+/* 「每周/每月几次」的进度：这周已经领满了，卡片得说明白为什么它是「已完成」 */
+.card .quota { font-size: 12px; color: var(--done); font-weight: 600; }
+.act .q { font-size: 11px; color: var(--muted); font-weight: 500; margin-left: 6px; }
+
+.badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--pending-bg); color: var(--pending); }
+.badge.done { background: var(--done-bg); color: var(--done); }
+.badge.expired { background: var(--expired-bg); color: var(--expired); }
+
+.card-actions { display: flex; gap: 6px; margin-top: 2px; }
+.mini {
+  font: inherit; font-size: 11.5px; padding: 3px 8px; border-radius: 7px;
+  border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer;
+}
+.mini:hover { color: var(--text); border-color: var(--muted); }
+
+.empty { color: var(--muted); font-size: 13.5px; padding: 24px 4px; text-align: center; }
+
+/* 窄屏：右栏落到日历下面。日历本身是 7 列网格，再窄也要保住宽高比。 */
+@media (max-width: 1080px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .side-list { max-height: none; }
+}
+
+.modal {
+  position: fixed; inset: 0; background: rgba(10, 12, 16, .5);
+  display: flex; align-items: flex-end; justify-content: center; z-index: 50; padding: 0;
+}
+/* 必须显式写：.modal 的 display:flex 会盖掉 UA 的 [hidden]{display:none} */
+.modal[hidden] { display: none; }
+@media (min-width: 640px) { .modal { align-items: center; } }
+
+.sheet {
+  background: var(--panel); border-radius: 16px 16px 0 0; padding: 18px; width: 100%;
+  max-width: 560px; max-height: 92vh; overflow: auto; display: flex; flex-direction: column; gap: 10px;
+}
+@media (min-width: 640px) { .sheet { border-radius: 16px; } }
+.sheet h3 { margin: 0 0 4px; font-size: 16px; }
+/* 「设置」弹窗里的 功能 / 模型 / 安全 三个同级小页（用户 2026-10-10 先要求分段、
+   同日又要求「做成三个同级的小页」）：顶上那排按钮是页签，一次只露一个
+   `.sheet-pane`。颜色一律走变量，夜里不会瞎。 */
+.sheet .tabs { display: flex; gap: 6px; }
+.sheet .tab {
+  flex: 1; font: inherit; font-size: 12.5px; padding: 7px 4px; cursor: pointer;
+  color: var(--muted); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px;
+}
+.sheet .tab.on { color: var(--accent); border-color: var(--accent); font-weight: 600; }
+/* 小页自己也要是一列，间距跟 `.sheet` 一样 —— 不然里面的控件会挤成一坨。 */
+.sheet .sheet-pane { display: flex; flex-direction: column; gap: 10px; }
+/* 必须显式写：上面那行的 display:flex 会盖掉 UA 的 [hidden]{display:none} */
+.sheet .sheet-pane[hidden] { display: none; }
+/* 「功能」页最上面那块：微信（扫码绑定 + 连接状态 + 退出微信）。用户 2026-10-11
+   要求把这套从顶栏和页面顶部挪进设置、排在「允许机器人闲聊」前面。二维码那块
+   HTML 用的还是原来的 `.login-panel`（`.login-text` / `.login-qr` 都没改名）——
+   弹窗里摆不下原来那种左右两栏横幅，所以这里覆盖成竖排，并去掉那圈外边距、
+   阴影和圆角边框：它现在是在弹窗**里面**，再套一层卡片就成了盒子里的盒子。 */
+.sheet .wx-block { display: flex; flex-direction: column; gap: 8px; }
+/* 同上：机器人没在跑（`bot: off`，比如只跑 `main.py web`）时整块收起来 ——
+   只剩一个「微信」标签杵在那儿比什么都费解。 */
+.sheet .wx-block[hidden] { display: none; }
+.sheet .wx-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sheet .wx-title { font-size: 12.5px; color: var(--muted); }
+/* 胶囊跟着「微信」两个字，右边留给「退出微信」按钮 */
+.sheet .wx-head .pill { margin-right: auto; }
+.sheet .login-panel {
+  flex-direction: column; align-items: stretch; gap: 10px;
+  margin: 0; padding: 12px; box-shadow: none;
+}
+.sheet .login-text p { max-width: none; }
+.sheet .login-qr { align-self: center; }
+.sheet label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
+/* 设置弹窗里的小灰字注释（`label` 是纵向 flex，所以这行会落在标题和输入框之间）：
+   ①「一言来源」下面那行分类字母表 —— 由 app.js 从 `/api/settings` 的
+   `sayings_categories` 填进来；② temperature 框上面那句「默认别动」—— 写死在 HTML 里，
+   用户 2026-10-10 点名要的。**故意不用 `class="dim"`**：`test_web.py` 里有一条断言
+   盯着设置弹窗里 `dim` 的处数，那是给「解释文字不许爬回页面」用的闸门，别蹭它。 */
+.sheet .cats, .sheet .hint { font-size: 11px; line-height: 1.5; color: var(--muted); opacity: .85; }
+.sheet input, .sheet select {
+  font: inherit; font-size: 14px; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; width: 100%;
+}
+.sheet .row { display: flex; gap: 10px; }
+.sheet .row > label { flex: 1; min-width: 0; }
+.sheet-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+.sheet-actions .danger { margin-right: auto; }
+
+/* 使用帮助：那段文字里全是缩进和换行（微信里就是纯文本），必须原样摆 */
+.help-text {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font: inherit; font-size: 13px; line-height: 1.7; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; max-height: 60vh; overflow: auto;
+}
+
+.toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  background: #1c1f23; color: #fff; font-size: 13px; padding: 9px 16px;
+  border-radius: 999px; z-index: 80; box-shadow: var(--shadow);
+}
+.toast[hidden] { display: none; }
+:root[data-theme="dark"] .toast { background: #f0f2f5; color: #16181d; }
+
+@media (max-width: 720px) {
+  .cell { min-height: 78px; }
+  .chip { font-size: 10.5px; }
+  main { padding: 10px 10px 60px; }
+  .top, .toolbar { padding: 10px 12px; }
+}

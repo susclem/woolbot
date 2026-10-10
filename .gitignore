@@ -1,0 +1,42 @@
+# 运行时数据：数据库、微信登录态、二维码、下载的图片
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite3
+
+# 真实配置（含 web token）和 API key
+config.json
+.env
+.env.*
+
+# 上游协议文档的本地副本（第三方内容，需要时自己重新下一份）
+docs/
+
+# 调试产生的临时物
+__pycache__/
+*.py[cod]
+.preview/
+.chrome/
+.chrome2/
+tests/.tmp/
+tests/out*.txt
+tests/preview.log
+tests/preview.err
+
+# 日志
+*.log
+logs/
+*.zstd
+
+# 虚拟环境与编辑器
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+*.swp
+
+# 操作系统自己生成的
+.DS_Store
+Thumbs.db
