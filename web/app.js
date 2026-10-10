@@ -386,7 +386,7 @@ function renderAgenda(first, last) {
 
 function card(r, occ, dayStr) {
   const st = occStatus(r, occ);
-  const STATUS_CN = { pending: '待抢', done: '已完成', expired: '已过期' };
+  const STATUS_CN = { pending: '待抢', done: '已完成', expired: '已过期', missed: '未抢到' };
   const meta = [r.platform, r.category].filter(Boolean).map(esc).join(' · ');
   const at = occ && occ.at ? occ.at : hhmm(r.grab_at);
   // 「还能领的」那节里摆的是**别的日子**开抢的活动：光写「10:00 开抢」会被读成
@@ -474,7 +474,7 @@ function dayTitle(day) {
 /** 右栏里的一行活动标题（点开看详情）。重复活动传 occ，徽章按**那一场**算。 */
 function actRow(r, occ) {
   const st = occStatus(r, occ);
-  const STATUS_CN = { pending: '待抢', done: '已完成', expired: '已过期' };
+  const STATUS_CN = { pending: '待抢', done: '已完成', expired: '已过期', missed: '未抢到' };
   const q = quotaText((occ && occ.quota) || r.quota);
   return `<button class="act ${st}" type="button" data-id="${r.id}">
     <span class="t">${esc(r.title)}${q ? `<span class="q">📊 ${q}</span>` : ''}</span>
@@ -520,7 +520,7 @@ function renderSidePane() {
 function renderDetail() {
   const row = state.rows.find((r) => r.id === state.detailId);
   if (!row) { state.detailId = null; renderSidePane(); return; }
-  const STATUS_CN = { pending: '待抢', done: '已完成', expired: '已过期' };
+  const STATUS_CN = { pending: '待抢', done: '已完成', expired: '已过期', missed: '未抢到' };
   const day = state.selected || state.today;
   const occ = occOn(day).find((o) => o.row.id === row.id);
   const st = occStatus(row, occ);

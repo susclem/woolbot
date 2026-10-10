@@ -432,7 +432,7 @@ def _with_repeat(line: dict[str, Any]) -> dict[str, Any]:
 
 
 def _with_occurrences(
-    line: dict[str, Any], d_from: date, d_to: date, done_days: Any = ()
+    line: dict[str, Any], d_from: date, d_to: date, done_days: Any = (), now: Any = None
 ) -> dict[str, Any]:
     """再进一步：告诉前端这条重复活动在区间里的每一场。
 
@@ -442,6 +442,8 @@ def _with_occurrences(
 
     每一场还带上**那一场自己的状态**：重复活动没有「整条完成」这回事，
     「每周二、四、周限 1 次」的券这周二领到了，本周四就该显示已完成。
+    ``now`` 一次请求只取一次（``_api_list`` 传进来），免得同一次响应里几场
+    对「现在」的看法不一致。
     """
     out = _with_repeat(line)
     if "repeat" not in out:
@@ -450,7 +452,7 @@ def _with_occurrences(
     occ = rp.occurrences_between(line, d_from, d_to)
     for item in occ:
         day = date.fromisoformat(item["day"])
-        item["status"] = rp.occurrence_status(line, day, done)
+        item["status"] = rp.occurrence_status(line, day, done, now)
         item["done"] = item["day"] in done
         state = rp.quota_state(line, day, done)
         if state["week"]["limit"] or state["month"]["limit"]:
@@ -466,7 +468,7 @@ def _with_occurrences(
 
 
 def _with_claimable(
-    line: dict[str, Any], d_from: date, d_to: date, done_days: Any = ()
+    line: dict[str, Any], d_from: date, d_to: date, done_days: Any = (), now: Any = None
 ) -> dict[str, Any]:
     """再补一条：区间里哪些天它「还能领，但不是这天开抢」。
 
@@ -475,7 +477,7 @@ def _with_claimable(
     两边各写一套日子判据就是这个下场，所以这里直接调 `pipeline` 里机器人用的
     那一对函数（**不是复制品**）。
     """
-    out = _with_occurrences(line, d_from, d_to, done_days)
+    out = _with_occurrences(line, d_from, d_to, done_days, now)
     days = [d.isoformat() for d in pl._days_between(d_from, d_to) if pl.claimable_on(line, d)]
     if days:
         out["claimable_days"] = days
@@ -483,21 +485,32 @@ def _with_claimable(
 
 
 def _filter_by_occurrence(
-    lines: list[dict], status: str, d_from: date, d_to: date, marks: dict[int, list[str]]
+    lines: list[dict],
+    status: str,
+    d_from: date,
+    d_to: date,
+    marks: dict[int, list[str]],
+    now: Any = None,
 ) -> list[dict]:
     """按「有没有某一场的状态就是 status」筛重复活动。
 
     行级的 ``status`` 一格装不下几十场：这周的额度用完了，行还是 ``pending``，
     可「待抢」列表里就不该再有它。所以重复活动按场次筛，一次性活动仍按行筛。
+    ``missed``（未抢到）也走这里 —— 上周六没抢到的那一场，就是靠它出现在列表里。
     """
-    if status not in ("pending", "done"):
+    if status == "expired":
+        # 「已过期」是**整条系列**的事（`db.refresh_expired()` 按 end_at 标的），
+        # 不是某一场：不加这一条，选「已过期」会把所有重复活动一股脑列出来 ——
+        # 真机上试过，31 行全出来，而库里一条 expired 都没有。
+        return [r for r in lines if str(r.get("status") or "") == rp.STATUS_EXPIRED]
+    if status not in ("pending", "done", "missed"):
         return lines
     kept: list[dict] = []
     for row in lines:
         done = marks.get(row["id"], ())
         for item in rp.occurrences_between(row, d_from, d_to):
             day = date.fromisoformat(item["day"])
-            if rp.occurrence_status(row, day, done) == status:
+            if rp.occurrence_status(row, day, done, now) == status:
                 kept.append(row)
                 break
     return kept
@@ -973,12 +986,15 @@ class Handler(BaseHTTPRequestHandler):
 
         once = _apply_filters(once, status, first("keyword"), first("platform"))
         rep = _apply_filters(rep, "all", first("keyword"), first("platform"))
-        if status in ("pending", "done"):
+        if status in ("pending", "done", "missed"):
             # 系列已经过期的整条都不该出现，不管它哪一天曾经是什么状态
             rep = [r for r in rep if (r.get("status") or "pending") != "expired"]
 
         marks = db.done_map([r["id"] for r in rep])
-        rep = _filter_by_occurrence(rep, status, d_from, d_to, marks)
+        # 一次请求只取一次钟：同一次响应里所有场次对「现在」的看法要一致，
+        # 否则跨秒那一刻会出现「一半待抢一半未抢到」。
+        ref = tu.now()
+        rep = _filter_by_occurrence(rep, status, d_from, d_to, marks, ref)
         rows = sorted(
             once + rep,
             key=lambda r: (r.get("grab_at") or "", r.get("start_at") or "", r["id"]),
@@ -991,7 +1007,8 @@ class Handler(BaseHTTPRequestHandler):
                 "today": today.isoformat(),
                 "count": len(rows),
                 "data": [
-                    _with_claimable(r, d_from, d_to, marks.get(r["id"], ())) for r in rows
+                    _with_claimable(r, d_from, d_to, marks.get(r["id"], ()), ref)
+                    for r in rows
                 ],
             }
         )

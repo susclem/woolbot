@@ -18,6 +18,10 @@
   --done-bg: #dcfce7;
   --expired: #6b7280;
   --expired-bg: #eceef1;
+  /* 「未抢到」：过去的那一场，没记「领到」。比 danger 淡一点 —— 它不是报错，
+     只是「这次没拿到」，点开还能补记。 */
+  --missed: #b91c1c;
+  --missed-bg: #fee2e2;
   --danger: #b91c1c;
   --danger-line: #f0b4b4;
   --term: #0f766e;
@@ -40,6 +44,8 @@
   --done-bg: #16301f;
   --expired: #9aa1ac;
   --expired-bg: #292c33;
+  --missed: #f87171;
+  --missed-bg: #3a2124;
   --danger: #f87171;
   --danger-line: #7f1d1d;
   --term: #2dd4bf;
@@ -309,6 +315,7 @@ main { padding: 14px 18px 60px; max-width: 1440px; margin: 0 auto; }
 .badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--pending-bg); color: var(--pending); }
 .badge.done { background: var(--done-bg); color: var(--done); }
 .badge.expired { background: var(--expired-bg); color: var(--expired); }
+.badge.missed { background: var(--missed-bg); color: var(--missed); }
 
 .card-actions { display: flex; gap: 6px; margin-top: 2px; }
 .mini {

@@ -28,8 +28,9 @@ quota_month        整数或 NULL，一个月最多领几次
   字段和用户原话走的是**同一个解析器** —— 模型只要说得出「每天 9 点」，剩下的
   交给 Python）
 - :func:`occurrence_on` 某一天它几点开抢（不是这天就 None）
-- :func:`occurrence_status` 那一天该显示成待抢还是已完成（**配额感知**：
-  本周/本月的次数用完了，那个周期里剩下的场次就都算拿不到了）
+- :func:`occurrence_status` 那一场该显示成待抢 / 已完成 / 未抢到（**配额感知**：
+  本周/本月的次数用完了，那个周期里剩下的场次就都算拿不到了；时间已经过去的
+  那一场，没记「领到」就是「未抢到」—— 它**照旧留在列表和统计里**）
 - :func:`describe` 回执/日历里那句「🔁 每天 09:00 · 周限2次」
 
 日历（``web.py``）和机器人（``pipeline.py``）都调这里，**不能再各算一套** ——
@@ -59,6 +60,11 @@ MAX_QUOTA = 99
 STATUS_PENDING = "pending"
 STATUS_DONE = "done"
 STATUS_EXPIRED = "expired"
+#: 时间已经过去、也没记「领到」的那一场。用户 2026-10-13 定的：**不能删、不能
+#: 藏**——「这个场次虽然过去了，但是我没抢到，需要保留用来计算还剩多少次」。
+#: 所以它只是一个**显示状态**：不占配额（占额度只认 ``activity_done`` 台账），
+#: 点开还能补记「其实那天抢到了」。
+STATUS_MISSED = "missed"
 
 #: 排期那几列。`db` 的 `_FIELDS`、web 的接口层、pipeline 的录入都用它，
 #: 免得哪一处漏了一列 —— 漏一列就是静默退化成一次性活动。
@@ -607,12 +613,43 @@ def quota_state(row: dict[str, Any], day: date, done_days: Iterable[Any] = ()) -
     return out
 
 
-def occurrence_status(row: dict[str, Any], day: date, done_days: Iterable[Any] = ()) -> str:
+def occurrence_over(row: dict[str, Any], day: date, now: Optional[datetime] = None) -> bool:
+    """这一场是不是已经彻底过去了（过去了就写「未抢到」，而不是「待抢」）。
+
+    **按天判断**：``day`` 早于今天才算过去。理由有两条：
+
+    1. 用户那种券的时间窗本来就是「09:00:00 至 23:59:59」（#80 原文），当天
+       一整天都还能领 —— 上午过去就说「未抢到」是冤枉它；
+    2. 早上跑和下午跑得出一份不一样的数据最难查。测试里的日期是相对今天算的
+       （``tests/test_web.py`` 的 ``iso()``），卡到钟点就会变成随运行时间飘红的
+       用例。``now`` 只是给测试传一个固定时刻，判断只用到它的日期部分。
+    """
+    rule = rule_of(row)
+    if rule is None:
+        return False
+    ref = now or tu.now()
+    return day < ref.date()
+
+
+def occurrence_status(
+    row: dict[str, Any],
+    day: date,
+    done_days: Iterable[Any] = (),
+    now: Optional[datetime] = None,
+) -> str:
     """这一天的这一场在日历里该显示成什么。
 
     用户 2026-10-11 定的规矩：**配额感知**。一周的额度用满之后，那一周里剩下的
     场次就都算「已完成」—— 再显示「待抢」是在骗人（点进去也领不到），下周自动
     恢复待抢。月额度同理。
+
+    用户 2026-10-13 补的规矩：**过去没抢到的场次一条都不许少**，只是不再写
+    「待抢」，改叫「未抢到」（``STATUS_MISSED``）—— 「这个场次虽然过去了，但是
+    我没抢到，需要保留用来计算还剩多少次」。所以：
+
+    * 「本月还剩几次」看的是 ``done_days`` 台账，未抢到的**不占额度**，
+      :func:`quota_state` 一个字的算法都没动；
+    * 它照旧出现在列表、月视图和计数里，点开还能补记「其实那天抢到了」。
     """
     if rule_of(row) is None:
         return str(row.get("status") or STATUS_PENDING)
@@ -624,10 +661,12 @@ def occurrence_status(row: dict[str, Any], day: date, done_days: Iterable[Any] =
         return STATUS_DONE
     # 行级的 ``done`` 对重复活动**没有意义**：一格 status 装不下几十场，用户以前
     # 误点过一次「标记完成」，整条就全成了已完成再也回不来。所以这里只认
-    # ``expired``（系列整个过期了，哪一天都不该再说「待抢」），其余一律待抢；
+    # ``expired``（系列整个过期了，哪一天都不该再说「待抢」），其余再按时间判；
     # 「这一天领到了」由 ``done_days`` 台账负责。
     status = str(row.get("status") or STATUS_PENDING)
-    return STATUS_EXPIRED if status == STATUS_EXPIRED else STATUS_PENDING
+    if status == STATUS_EXPIRED:
+        return STATUS_EXPIRED
+    return STATUS_MISSED if occurrence_over(row, day, now) else STATUS_PENDING
 
 
 # ---------------------------------------------------------------------------

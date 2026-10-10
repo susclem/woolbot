@@ -762,6 +762,61 @@ class QuotaApiTest(WebApiTestBase):
         )["data"]
         self.assertEqual([r["id"] for r in pending], [aid], "下周一该自己恢复待抢")
 
+    def test_a_past_day_nobody_marked_reads_as_missed(self):
+        """过去那几场没记「领到」→ 显示「未抢到」，但必须留在列表和计数里。
+
+        User said (2026-10-13)：「这个问题场次虽然过去了，但是我没抢到，需要保留
+        用来计算还剩多少次」—— 所以它既不能被删掉，也不能继续冒充「待抢」。
+        当天不算：那种券的时间窗本来就开到 23:59。
+        """
+        aid = self._create({
+            "title": "每天都能领的券",
+            "start_at": iso(-3, "09:00"),
+            "grab_at": iso(0, "09:00"),
+            "end_at": iso(3, "23:59"),
+            "repeat": "每天 09:00",
+        })
+        span = f"from={iso(-3)[:10]}&to={iso(3)[:10]}"
+        rows = self.ok("GET", f"/api/activities?{span}")["data"]
+        occ = {i["day"]: i["status"] for i in rows[0]["occurrences"]}
+        self.assertEqual(occ.get(iso(-3)[:10]), "missed")
+        self.assertEqual(occ.get(iso(-1)[:10]), "missed")
+        self.assertEqual(occ.get(iso(0)[:10]), "pending", "当天窗口还没关，不许说没抢到")
+        self.assertEqual(occ.get(iso(1)[:10]), "pending")
+
+        # 筛选：两档都能筛到这一条（它在这个区间里两天的场次都有）
+        for status in ("missed", "pending"):
+            got = self.ok("GET", f"/api/activities?{span}&status={status}")["data"]
+            self.assertEqual([r["id"] for r in got], [aid], status)
+
+        # 事后补记「其实那天抢到了」：那一场翻成已完成，别的场次一动不动
+        self.ok("POST", f"/api/activity/{aid}/done", {"day": iso(-1)[:10]})
+        rows = self.ok("GET", f"/api/activities?{span}")["data"]
+        occ = {i["day"]: i["status"] for i in rows[0]["occurrences"]}
+        self.assertEqual(occ.get(iso(-1)[:10]), "done")
+        self.assertEqual(occ.get(iso(-3)[:10]), "missed")
+        self.assertEqual([i["day"] for i in rows[0]["occurrences"] if i["done"]], [iso(-1)[:10]])
+
+    def test_the_expired_filter_does_not_swallow_every_repeating_row(self):
+        """「已过期」是整条系列的事：选它不该把还在跑的重复活动也列出来。
+
+        以前 `_filter_by_occurrence` 只认 pending/done/missed，别的状态一律原样
+        放行 —— 于是「已过期」那一档等于没筛（真机上 31 行全出来，而库里一条
+        expired 都没有，用户看到的是「选已过期＝看全部」）。
+        """
+        live = self._daily()
+        dead = self._create({
+            "title": "已经结束的券",
+            "grab_at": iso(-20, "10:00"),
+            "end_at": iso(-10, "23:59"),
+            "repeat": "每天 10:00",
+        })
+        self.ok("POST", f"/api/activity/{dead}/status", {"status": "expired"})
+        span = f"from={iso(-20)[:10]}&to={iso(20)[:10]}"
+        got = self.ok("GET", f"/api/activities?{span}&status=expired")["data"]
+        self.assertEqual([r["id"] for r in got], [dead])
+        self.assertNotIn(live, [r["id"] for r in got])
+
     def test_a_done_day_can_be_taken_back(self):
         aid = self._daily(quota_week="1")
         today = iso(0)[:10]

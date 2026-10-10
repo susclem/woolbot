@@ -1717,6 +1717,10 @@ class QuotaTest(unittest.TestCase):
     NEXT_TUE = date(2026, 10, 13)
     OCT15 = date(2026, 10, 15)
     NOV01 = date(2026, 11, 1)
+    #: 这一批用例里的「现在」。**必须显式传**：`occurrence_status` 从 2026-10-13
+    #: 起会把过去那些没记「领到」的场次判成「未抢到」，不传就拿真实时钟 ——
+    #: 固定日期的用例会在某一天突然集体变红，那种红最难查。
+    NOW = datetime(2026, 10, 5, 8, 0)
 
     def setUp(self) -> None:
         base = Path(__file__).resolve().parent / ".tmp"
@@ -1839,9 +1843,11 @@ class QuotaTest(unittest.TestCase):
         # 自然周从周一起 —— 否则「每周一、日各一次」会被算进两个不同的周
         self.assertEqual((state["from"], state["to"]), ("2026-10-05", "2026-10-11"))
         # 这周二领到了，本周四那场就不该再说「待抢」（点进去也领不到）
-        self.assertEqual(rp.occurrence_status(row, self.THU, ["2026-10-06"]), "done")
+        self.assertEqual(rp.occurrence_status(row, self.THU, ["2026-10-06"], self.NOW), "done")
         # 下周二自动恢复
-        self.assertEqual(rp.occurrence_status(row, self.NEXT_TUE, ["2026-10-06"]), "pending")
+        self.assertEqual(
+            rp.occurrence_status(row, self.NEXT_TUE, ["2026-10-06"], self.NOW), "pending"
+        )
 
     def test_quota_is_counted_per_calendar_month(self):
         from app import repeat as rp
@@ -1854,9 +1860,9 @@ class QuotaTest(unittest.TestCase):
             "quota_month": 2,
         }
         done = ["2026-10-01", "2026-10-02"]
-        self.assertEqual(rp.occurrence_status(row, date(2026, 10, 3), done), "done")
-        self.assertEqual(rp.occurrence_status(row, self.OCT15, done), "done")
-        self.assertEqual(rp.occurrence_status(row, self.NOV01, done), "pending")
+        self.assertEqual(rp.occurrence_status(row, date(2026, 10, 3), done, self.NOW), "done")
+        self.assertEqual(rp.occurrence_status(row, self.OCT15, done, self.NOW), "done")
+        self.assertEqual(rp.occurrence_status(row, self.NOV01, done, self.NOW), "pending")
         state = rp.quota_state(row, self.OCT15, done)["month"]
         self.assertEqual((state["from"], state["to"]), ("2026-10-01", "2026-10-31"))
 
@@ -1870,9 +1876,52 @@ class QuotaTest(unittest.TestCase):
             "repeat_at": "10:00",
             "status": "done",
         }
-        self.assertEqual(rp.occurrence_status(row, self.WED, []), "pending")
+        self.assertEqual(rp.occurrence_status(row, self.WED, [], self.NOW), "pending")
         # 但整个系列过期了还是得认
-        self.assertEqual(rp.occurrence_status(dict(row, status="expired"), self.WED, []), "expired")
+        self.assertEqual(
+            rp.occurrence_status(dict(row, status="expired"), self.WED, [], self.NOW), "expired"
+        )
+
+    # -- 过去没抢到的那一场（2026-10-13 用户定的） --------------------------
+
+    def test_a_past_occurrence_reads_as_missed(self):
+        """过去没抢到的那一场照旧留着，只是不再写「待抢」。
+
+        User said (2026-10-13)：「这个问题场次虽然过去了，但是我没抢到，需要保留
+        用来计算还剩多少次」—— 所以它换个说法继续出现在列表和计数里，
+        **也照样不占配额**（额度只认按天台账），事后还能补记「其实抢到了」。
+        """
+        from app import repeat as rp
+
+        row = {
+            "grab_at": "2026-10-05T09:00",
+            "end_at": "2026-12-31T23:59",
+            "repeat_kind": "weekly",
+            "repeat_at": "09:00",
+            "repeat_until": "23:59",
+            "repeat_days": "5,6",
+            "quota_month": 1,
+        }
+        # 上周六（10-03）没记「领到」→ 未抢到；今天那一场还没过完 → 待抢
+        self.assertEqual(rp.occurrence_status(row, date(2026, 10, 3), [], self.NOW), "missed")
+        self.assertEqual(rp.occurrence_status(row, self.MON, [], self.NOW), "pending")
+        # 它不吃额度：本月还剩 1 次
+        state = rp.quota_state(row, self.MON, [])["month"]
+        self.assertEqual((state["done"], state["left"]), (0, 1))
+        # 事后补记「其实那天抢到了」，那一场就翻成已完成
+        self.assertEqual(
+            rp.occurrence_status(row, date(2026, 10, 3), ["2026-10-03"], self.NOW), "done"
+        )
+
+    def test_todays_field_is_not_missed_yet(self):
+        """当天的场次不叫「未抢到」—— 那种券的窗口本来就是「09:00 至 23:59」。"""
+        from app import repeat as rp
+
+        row = {"repeat_kind": "daily", "repeat_at": "09:00", "repeat_until": "23:59"}
+        self.assertEqual(rp.occurrence_status(row, self.MON, [], self.NOW), "pending")
+        self.assertEqual(
+            rp.occurrence_status(row, self.MON - timedelta(days=1), [], self.NOW), "missed"
+        )
 
     def test_the_edit_box_never_gets_the_quota_tacked_on(self):
         """编辑框回填的是「纯排期」那句 —— 带着「· 周限1次」回填，用户再存一次
