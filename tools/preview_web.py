@@ -114,6 +114,11 @@ def main(argv: list[str] | None = None) -> int:
             "qr_token": 1,
         })
 
+    # 设置面板里的模型名 / base_url / 「到底配没配 key」都来自 `web.set_config` 挂进来
+    # 的这份配置（`main.py` 启动时也这么挂）。预览脚本以前不挂，于是弹窗里模型是空的、
+    # 顶栏还挂着「还没配 AI 模型」的黄条 —— 哪怕 `-c` 指的那份配置里明明写了 key。
+    webmod.set_config(cfg)
+
     httpd = webmod.create_server(cfg.as_dict())
     host = (cfg.get("web") or {}).get("host") or "127.0.0.1"
     token = (cfg.get("web") or {}).get("token") or ""
